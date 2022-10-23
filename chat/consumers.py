@@ -42,14 +42,28 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
         try:
             json_data = json.loads(data)
 
-            if await self.query(json_data["client_id"]) == False:
-               await self.close(3001)
+            if await self.query(json_data["mail_id"]) == False:
+                await self.send_json({
+                    "event": "auth",
+                    "status": "error",
+                    "message": "User doesn't exist on this server"
+                })
+                await self.close(3001)
 
-            if json_data["password"] == await self.get_user_password(json_data["client_id"]):
+            if json_data["password"] == await self.get_user_password(await self.get_user(json_data["mail_id"])):
                 self.is_authorised = True
-                await self.channel_layer.group_add(json_data["client_id"], self.channel_name)
-                print(f'{json_data["username"]} is authorised')
+                await self.channel_layer.group_add(await self.get_user_id(json_data["mail_id"]), self.channel_name)
+                await self.send_json({
+                    "event": "auth",
+                    "status": "done",
+                    "client_id": str(await self.get_user_id(json_data["mail_id"]))
+                })
             else:
+                await self.send_json({
+                    "event": "auth",
+                    "status": "error",
+                    "message": "Incorrect Password"
+                })
                 await self.close(3001)
         except  Exception as e:
             print("Retrying, ", e)
@@ -58,6 +72,7 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
     async def chat_message(self, event):
         try:
             await self.send_json({
+                "event": "message"
                 "message": event["message"],
                 "author": event["author"],
                 "time": event["time"],
@@ -67,12 +82,20 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
             print("Error sending the message\n", e)
 
     @sync_to_async
-    def query(self, client_id):
-        return ChatUser.objects.filter(client_id=client_id).exists()
+    def query(self, mail_id):
+        return ChatUser.objects.filter(mail_id=mail_id).exists()
         
     @sync_to_async
-    def get_user_password(self, pk) -> ChatUser:
+    def get_user_password(self, pk):
         return ChatUser.objects.get(pk=pk).password
+
+    @sync_to_async
+    def get_user(self, mail_id) -> ChatUser:
+        return ChatUser.objects.get(mail_id=mail_id)
+
+    @sync_to_async
+    def get_user_id(self, mail_id):
+        return ChatUser.objects.get(mail_id=mail_id).client_id
 
 class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
 
@@ -124,8 +147,6 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
                     "event": "confirmation",
                     "status": "done"
                 })
-
-                
 
             else:
                 await self.send_json({
