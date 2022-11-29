@@ -1,4 +1,4 @@
 venv
 dump.rdb
-db.sqlite3
-c_hat_server/__pycache__/*
+*.pyc
+*.sqlite3
