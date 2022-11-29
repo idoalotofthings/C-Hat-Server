@@ -20,7 +20,7 @@ class EventBus:
     def register_event(self, event: Event):
         self.__queue_map[event] = []
 
-    def execute(self, event: Event):
+    def fire_event(self, event: Event):
         for callable in self.__queue_map[event]:
             callable()
 
