@@ -1,2 +1,4 @@
- *.sqlite3
- venv
+venv
+dump.rdb
+db.sqlite3
+c_hat_server/__pycache__/*
