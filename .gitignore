@@ -2,3 +2,5 @@ venv
 dump.rdb
 *.pyc
 *.sqlite3
+plugins.json
+plugins/*
