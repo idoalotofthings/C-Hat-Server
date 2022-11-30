@@ -1,9 +1,12 @@
 import random
+import json
+
 from asgiref.sync import sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer, JsonWebsocketConsumer
 from chat.models import ChatUser
 from django.core.mail import send_mail
-import json
+from busprovider import bus
+from eventbus.event import Event
 
 class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
 
@@ -12,13 +15,15 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
     start_millis = None
 
     async def connect(self):
+        bus.fire_event(Event.ON_CLIENT_CONNECT)
         await self.accept()
         
     async def receive(self, text_data):
-        
+        bus.fire_event(Event.ON_DATA_RECEIVE, text_data)
         if self.is_authorised == False:
             await self.authorise(text_data)
         else:
+            bus.fire_event(Event.ON_MESSAGE, text_data)
             try:
                 json_data = json.loads(text_data)
                 await self.channel_layer.group_send(
@@ -32,44 +37,44 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
                    }
                 )
             except Exception as e:
+                bus.fire_event(Event.ON_MESSAGE_SEND_FAILED, e)
                 print(e)
             
     async def disconnect(self, code):
-        print(code)
+        bus.fire_event(Event.ON_CLIENT_DISCONNECT, code)
 
 
     async def authorise(self, data):
         
-            json_data = json.loads(data)
-            print(json_data)
-            if await self.query(json_data["mail_id"]) == False:
+        json_data = json.loads(data)
+        if await self.query(json_data["mail_id"]) == False:
                 
-                await self.send_json({
-                    "event": "auth",
-                    "status": "error",
-                    "message": "User doesn't exist on this server"
-                })
-                await self.close(3001)
+            await self.send_json({
+                "event": "auth",
+                "status": "error",
+                "message": "User doesn't exist on this server"
+            })
+            bus.fire_event(Event.ON_MAIL_ID_DOESNT_EXIST, json_data["mail_id"])
+            await self.close(3001)
 
-            if json_data["password"] == await self.get_user_password(json_data["mail_id"]):
-                self.is_authorised = True
-                await self.channel_layer.group_add(await self.get_user_id(json_data["mail_id"]), self.channel_name)
-                await self.send_json({
-                    "event": "auth",
-                    "status": "done",
-                    "client_id": str(await self.get_user_id(json_data["mail_id"])),
-                    "username": str(await self.get_username(json_data["mail_id"]))
-                })
-            else:
-                await self.send_json({
-                    "event": "auth",
-                    "status": "error",
-                    "message": "Incorrect Password"
-                })
-                await self.close(3001)
-        
-        
-
+        if json_data["password"] == await self.get_user_password(json_data["mail_id"]):
+            self.is_authorised = True
+            bus.fire_event(Event.ON_USER_LOGIN, json_data["mail_id"])
+            await self.channel_layer.group_add(await self.get_user_id(json_data["mail_id"]), self.channel_name)
+            await self.send_json({
+                "event": "auth",
+                "status": "done",
+                "client_id": str(await self.get_user_id(json_data["mail_id"])),
+                "username": str(await self.get_username(json_data["mail_id"]))
+            })
+        else:
+            await self.send_json({
+                "event": "auth",
+                "status": "error",
+                "message": "Incorrect Password"
+            })
+            bus.fire_event(Event.ON_USER_PASSWORD_INCORRECT, json_data["mail_id"])
+            await self.close(3001)
 
     async def chat_message(self, event):
         try:
@@ -81,7 +86,7 @@ class ChatServiceConsumer(AsyncJsonWebsocketConsumer):
                 "rcid": event["rcid"]
             })
         except Exception as e:
-            print("Error sending the message\n", e)
+            bus.fire_event(Event.ON_MESSAGE_SEND_FAILED, e)
 
     @sync_to_async
     def query(self, mail_id):
@@ -111,9 +116,11 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
     _mail_id = None
 
     async def connect(self):
+        bus.fire_event(Event.ON_CLIENT_CONNECT)
         await self.accept()
     
     async def receive(self, text_data):
+        bus.fire_event(Event.ON_DATA_RECEIVE, text_data)
         json_data = json.loads(text_data)
 
         if json_data["event"] == "register":
@@ -129,6 +136,7 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
                     message = f'Hey {json_data["username"]}, thanks for joining C-Hat.\n\n Your verification code is {code}.\n Enter this code in your C-Hat client to start chatting'
                     send_mail(f'Verify your email', message, None, [json_data["mail_id"]], fail_silently=False)
                     await self.send_json({"event":"verify"})
+                    bus.fire_event(Event.ON_OTP_SENT)
 
                 else:
                     print("mail exists")
@@ -137,14 +145,18 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
                         "message": "Mail ID already exists"
                     })
 
+                    bus.fire_event(Event.ON_REGISTER_FAIL_MAIL_EXISTS)
+
                     await self.close()
                 
             except Exception as e:
-                print("Can't register user: ", e)
+                bus.fire_event(Event.ON_REGISTER_FAIL)
+                
 
         elif json_data["event"] == "confirmation":
             
             if json_data["code"] == str(self._verification_code):
+
                 new_user = ChatUser(
                     client_id = await self.generate_client_id(),
                     username = self._username,
@@ -153,6 +165,7 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
                 )
 
                 await sync_to_async(new_user.save)()
+                bus.fire_event(Event.ON_USER_REGISTER)
                 await self.send_json({
                     "event": "confirmation",
                     "status": "done"
@@ -164,9 +177,13 @@ class RegisterUserConsumer(AsyncJsonWebsocketConsumer):
                     "status": "error",
                     "message": "Incorrect OTP"
                 })
+                bus.fire_event(Event.ON_OTP_INCORRECT)
 
         else:
             await self.close(3001)
+
+    async def disconnect(self, code):
+        bus.fire_event(Event.ON_CLIENT_DISCONNECT, code)
 
     @sync_to_async
     def query(self, mail_id):
