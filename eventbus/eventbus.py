@@ -20,9 +20,12 @@ class EventBus:
     def register_event(self, event: Event):
         self.__queue_map[event] = []
 
-    def fire_event(self, event: Event):
+    def fire_event(self, event: Event, *args):
         for callable in self.__queue_map[event]:
-            callable()
+            if args.count != 0:
+                callable(args[0])
+            else:
+                callable()
 
     def start(self):
         if self.__event_bus_loaded == False:
