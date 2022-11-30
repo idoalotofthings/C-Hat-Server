@@ -37,6 +37,7 @@ def load_plugins():
         plugins = json.load(open("plugins.json"))
         for plugin in plugins:
             importlib.import_module(f"plugins.{plugin}.{plugin}")
+            print(f"Loaded {plugin}")
     except Exception as e:
         print("Error loading plugins:", e)
 
