@@ -13,6 +13,15 @@ from channels.http import AsgiHandler
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 from chat import routing
+from busprovider import bus
+import signal
+import sys
+
+def stop(_, __):
+    bus.stop()
+    sys.exit(0)
+
+signal.signal(signal.SIGINT, stop)
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'c_hat_server.settings')
 
